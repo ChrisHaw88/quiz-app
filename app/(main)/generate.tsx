@@ -1,10 +1,12 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Button, StyleSheet, View } from "react-native";
 
 export default function Generate() {
   return (
     <View style={styles.container}>
-      <View style={styles.titleContainer}>
-        <Text style={styles.title}>Generate Questions</Text>
+      <View style={styles.buttonArea}>
+        <Button title="Cyber Security" onPress={() => {/* Add functionality here */}} />
+        <Button title="Digital Forensics" onPress={() => {/* Add functionality here */}} />
+        <Button title="Java Programming" onPress={() => {/* Add functionality here */}} />
       </View>
     </View>
   );
@@ -18,17 +20,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 20,
   },
-  titleContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: "bold",
-  },
   stepContainer: {
     gap: 8,
     marginBottom: 8,
+  },
+  buttonArea: {
+    width: "80%",
+    gap: 12,
   },
 });
