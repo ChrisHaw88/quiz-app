@@ -1,15 +1,11 @@
 import { router } from "expo-router";
-import { Button, StyleSheet, Text, View } from "react-native";
+import { Button, StyleSheet, View } from "react-native";
 
 export default function Index() {
   return (
     <View style={styles.container}>
-      <View style={styles.titleContainer}>
-        <Text style={styles.title}>Sign In</Text>
-      </View>
-
       <View style={styles.buttonArea}>
-        <Button title="Continue" onPress={() => router.push("/dashboard")} />
+        <Button title="Sign In" onPress={() => router.push("/dashboard")} />
       </View>
     </View>
   );
@@ -23,15 +19,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 20,
     gap: 20,
-  },
-  titleContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: "bold",
   },
   buttonArea: {
     width: "80%",
