@@ -9,6 +9,8 @@ export default function Layout() {
       <Stack.Screen name="(main)/generate" options={{ title: "Generate Questions" }} />
       <Stack.Screen name="(main)/profile" options={{ title: "Profile" }} />
       <Stack.Screen name="(main)/quiz" options={{ title: "Quiz" }} />
+      <Stack.Screen name="(main)/upload" options={{ title: "Upload PDF" }} />
+      <Stack.Screen name="(main)/signup" options={{ title: "Sign Up" }} />
     </Stack>
   );
 }

@@ -26,8 +26,4 @@ const styles = StyleSheet.create({
     width: "80%",
     gap: 12,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
 });
