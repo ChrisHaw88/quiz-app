@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Server-side Supabase client (service role). Never use service role in the app.
+    //server-side supabase client
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
