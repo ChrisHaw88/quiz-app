@@ -1,9 +1,15 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Button, StyleSheet, Text, View } from "react-native";
 import { supabase } from "../../lib/supabaseClient";
+
+type PickedPdf = {
+  name: string;
+  size: number | null;
+  uri: string;
+};
 
 function base64ToArrayBuffer(base64: string) {
   const binary = atob(base64);
@@ -15,18 +21,13 @@ function base64ToArrayBuffer(base64: string) {
 export default function Upload() {
   const { subject } = useLocalSearchParams<{ subject?: string }>();
 
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [fileSize, setFileSize] = useState<number | null>(null);
-  const [fileUri, setFileUri] = useState<string | null>(null);
-
+  const [files, setFiles] = useState<PickedPdf[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [uploadedPath, setUploadedPath] = useState<string | null>(null);
-  const [noteId, setNoteId] = useState<string | null>(null);
 
-  const pickPdf = async () => {
-    setUploadedPath(null);
-    setNoteId(null);
+  const [uploadedPaths, setUploadedPaths] = useState<string[]>([]);
+  const [noteIds, setNoteIds] = useState<string[]>([]);
 
+  const addPdf = async () => {
     const picked = await DocumentPicker.getDocumentAsync({
       type: "application/pdf",
       multiple: false,
@@ -35,10 +36,23 @@ export default function Upload() {
 
     if (picked.canceled) return;
 
-    const file = picked.assets[0];
-    setFileName(file.name ?? "Unknown file");
-    setFileSize(typeof file.size === "number" ? file.size : null);
-    setFileUri(file.uri ?? null);
+    const f = picked.assets[0];
+    if (!f?.uri) return;
+
+    const next: PickedPdf = {
+      name: f.name ?? `notes-${Date.now()}.pdf`,
+      size: typeof f.size === "number" ? f.size : null,
+      uri: f.uri,
+    };
+
+    //prevent duplicates by uri
+    setFiles((prev) => (prev.some((x) => x.uri === next.uri) ? prev : [...prev, next]));
+  };
+
+  const clearAll = () => {
+    setFiles([]);
+    setUploadedPaths([]);
+    setNoteIds([]);
   };
 
   const formatBytes = (bytes: number) => {
@@ -47,19 +61,19 @@ export default function Upload() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  const uploadToSupabase = async () => {
+  const summary = useMemo(() => {
+    if (files.length === 0) return "No PDFs selected";
+    return `${files.length} PDF${files.length === 1 ? "" : "s"} selected`;
+  }, [files.length]);
+
+  const uploadAllAndGenerate = async () => {
     try {
-      if (!subject) {
-        Alert.alert("Missing subject", "Go back and pick a subject first.");
+
+      if (files.length === 0) {
+        Alert.alert("No PDFs selected", "Please add at least one PDF.");
         return;
       }
 
-      if (!fileUri) {
-        Alert.alert("No PDF selected", "Please choose a PDF first.");
-        return;
-      }
-
-      //get logged-in user id. this is neeed as lecture_notes in supabase links to auth.users
       const { data: userData, error: userErr } = await supabase.auth.getUser();
       if (userErr || !userData.user) {
         Alert.alert("Not signed in", "Please sign in before uploading.");
@@ -67,53 +81,59 @@ export default function Upload() {
       }
 
       setUploading(true);
+      setUploadedPaths([]);
+      setNoteIds([]);
 
-      //read file as base64
-      const base64 = await FileSystem.readAsStringAsync(fileUri, {
-        encoding: "base64",
-      });
-
-      //upload file to supabase storage
       const bucket = "lecture-notes";
-      const safeName = (fileName ?? `notes-${Date.now()}.pdf`).replace(/\s+/g, "_");
-      const path = `${Date.now()}-${safeName}`;
+      const newPaths: string[] = [];
+      const newNoteIds: string[] = [];
 
-      const { error: uploadError } = await supabase.storage
-        .from(bucket)
-        .upload(path, base64ToArrayBuffer(base64), {
-          contentType: "application/pdf",
-          upsert: false,
-        });
+      //upload each PDF and insert to lecture_notes row inn supabase, collecting the storage paths and note ids 
+      for (const file of files) {
+        const safeName = file.name.replace(/\s+/g, "_");
+        const path = `${Date.now()}-${Math.random().toString(16).slice(2)}-${safeName}`;
 
-      if (uploadError) {
-        Alert.alert("Storage upload failed", uploadError.message);
-        return;
+        const base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: "base64" });
+
+        const { error: uploadError } = await supabase.storage
+          .from(bucket)
+          .upload(path, base64ToArrayBuffer(base64), {
+            contentType: "application/pdf",
+            upsert: false,
+          });
+
+        if (uploadError) {
+          Alert.alert("Storage upload failed", `${file.name}: ${uploadError.message}`);
+          return;
+        }
+
+        const { data: inserted, error: insertError } = await supabase
+          .from("lecture_notes")
+          .insert({
+            user_id: userData.user.id,
+            subject_name: subject,
+            storage_bucket: bucket,
+            storage_path: path,
+            original_filename: file.name,
+          })
+          .select("id")
+          .single();
+
+        if (insertError) {
+          Alert.alert("DB insert failed", `${file.name}: ${insertError.message}`);
+          return;
+        }
+
+        newPaths.push(path);
+        newNoteIds.push(inserted.id);
       }
 
-      //insert row into lecture_notes table with user_id and storage path
-      const { data: inserted, error: insertError } = await supabase
-        .from("lecture_notes")
-        .insert({
-          user_id: userData.user.id,
-          subject_name: subject,
-          storage_bucket: bucket,
-          storage_path: path,
-          original_filename: fileName,
-        })
-        .select("id")
-        .single();
+      setUploadedPaths(newPaths);
+      setNoteIds(newNoteIds);
 
-      if (insertError) {
-        Alert.alert("DB insert failed", insertError.message);
-        return;
-      }
-
-      setUploadedPath(path);
-      setNoteId(inserted?.id ?? null);
-
-      //call edge function to generate MCQs from the uploaded PDF
+      //call edge function with all pdf paths. the edge function has been updated to accept more than one path
       const { data, error } = await supabase.functions.invoke("generate-questions", {
-        body: { subject, bucket, path },
+        body: { subject, bucket, paths: newPaths },
       });
 
       if (error) {
@@ -126,7 +146,6 @@ export default function Upload() {
         return;
       }
 
-      //route the generated questions to quiz page of the app
       router.replace({
         pathname: "/(main)/quiz",
         params: {
@@ -144,34 +163,52 @@ export default function Upload() {
   return (
     <View style={styles.container}>
       <View style={styles.stepContainer}>
-        <Text style={styles.title}>Upload PDF</Text>
+        <Text style={styles.title}>Upload PDF Notes</Text>
         <Text style={styles.subtitle}>{subject ?? "No subject selected"}</Text>
+        <Text style={styles.subtitle}>{summary}</Text>
       </View>
 
       <View style={styles.buttonArea}>
-        <Button title="Choose PDF" onPress={pickPdf} disabled={uploading} />
+        <Button title="Add PDF" onPress={addPdf} disabled={uploading} />
+        <Button title="Clear PDFs" onPress={clearAll} disabled={uploading || files.length === 0} />
         <Button
           title="Upload & Generate Questions"
-          onPress={uploadToSupabase}
-          disabled={uploading || !fileUri || !subject}
+          onPress={uploadAllAndGenerate}
+          disabled={uploading || files.length === 0 || !subject}
         />
         {uploading && <ActivityIndicator style={{ marginTop: 10 }} />}
       </View>
 
       <View style={styles.stepContainer}>
-        <Text style={styles.label}>Selected file:</Text>
-        <Text style={styles.value}>{fileName ?? "None"}</Text>
+        {files.map((f, idx) => (
+          <Text key={f.uri} style={styles.valueSmall}>
+            {idx + 1}. {f.name} {f.size != null ? `(${formatBytes(f.size)})` : ""}
+          </Text>
+        ))}
+      </View>
 
-        <Text style={styles.label}>Size:</Text>
-        <Text style={styles.value}>
-          {fileSize !== null ? formatBytes(fileSize) : "Unknown"}
-        </Text>
+      <View style={styles.stepContainer}>
+        {uploadedPaths.length > 0 && (
+          <>
+            <Text style={styles.label}>Uploaded paths:</Text>
+            {uploadedPaths.map((p) => (
+              <Text key={p} style={styles.valueSmall}>
+                {p}
+              </Text>
+            ))}
+          </>
+        )}
 
-        <Text style={styles.label}>Storage path:</Text>
-        <Text style={styles.valueSmall}>{uploadedPath ?? "Not uploaded yet"}</Text>
-
-        <Text style={styles.label}>Lecture note ID:</Text>
-        <Text style={styles.valueSmall}>{noteId ?? "Not created yet"}</Text>
+        {noteIds.length > 0 && (
+          <>
+            <Text style={styles.label}>Lecture note IDs:</Text>
+            {noteIds.map((id) => (
+              <Text key={id} style={styles.valueSmall}>
+                {id}
+              </Text>
+            ))}
+          </>
+        )}
       </View>
     </View>
   );
@@ -208,10 +245,6 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: "600",
-    textAlign: "center",
-  },
-  value: {
-    fontSize: 16,
     textAlign: "center",
   },
   valueSmall: {

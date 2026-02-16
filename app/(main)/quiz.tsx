@@ -1,11 +1,12 @@
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useMemo, useState } from "react";
-import { Button, StyleSheet, Text, View } from "react-native";
+import { Alert, Button, ScrollView, StyleSheet, Text, View } from "react-native";
 
 type MCQ = {
   question: string;
   answers: { A: string; B: string; C: string; D: string };
   correct: "A" | "B" | "C" | "D";
+  supporting_quote?: string;
 };
 
 export default function Quiz() {
@@ -29,14 +30,15 @@ export default function Quiz() {
 
   if (!questions || questions.length === 0) {
     return (
-      <View style={styles.container}>
+      //change this page to a scrollview so that all content is visible even on smaller screens
+      <ScrollView style={styles.page} contentContainerStyle={styles.container}>
         <View style={styles.titleContainer}>
           <Text style={styles.title}>{subject ?? "Quiz"}</Text>
         </View>
         <View style={styles.stepContainer}>
           <Text>No questions received.</Text>
         </View>
-      </View>
+      </ScrollView>
     );
   }
 
@@ -50,9 +52,13 @@ export default function Quiz() {
   };
 
   const goNext = () => {
+    if (index >= total - 1) {
+      finishQuiz();
+      return;
+    }
+    setIndex((prev) => prev + 1);
     setFeedback(null);
     setIsLocked(false);
-    setIndex((prev) => prev + 1);
   };
 
   const handleAnswer = (selected: "A" | "B" | "C" | "D") => {
@@ -67,20 +73,21 @@ export default function Quiz() {
     } else {
       setFeedback(`Incorrect! Correct answer: ${q.correct}`);
     }
+  };
 
-    // Auto-advance after a short delay
-    setTimeout(() => {
-      if (index >= total - 1) {
-        finishQuiz();
-      } else {
-        goNext();
-      }
-    }, 900);
+  //added this to allow user to view the supporting quote for each question in an alert pulled from the PDF notes
+  const showSource = () => {
+    const quote = q.supporting_quote?.trim();
+    if (!quote) {
+      Alert.alert("No source available", "This question did not include a supporting quote.");
+      return;
+    }
+    Alert.alert("Source from notes", quote);
   };
 
   if (isFinished) {
     return (
-      <View style={styles.container}>
+      <ScrollView style={styles.page} contentContainerStyle={styles.container}>
         <View style={styles.titleContainer}>
           <Text style={styles.title}>{subject ?? "Quiz"}</Text>
         </View>
@@ -93,14 +100,14 @@ export default function Quiz() {
         </View>
 
         <View style={styles.buttonArea}>
-          <Button title="Done" onPress={() => router.replace("/dashboard")} />
+          <Button title="Done" onPress={() => router.replace("/(main)/dashboard")} />
         </View>
-      </View>
+      </ScrollView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.page} contentContainerStyle={styles.container}>
       <View style={styles.titleContainer}>
         <Text style={styles.title}>{subject ?? "Quiz"}</Text>
       </View>
@@ -129,15 +136,22 @@ export default function Quiz() {
           <Text style={styles.feedbackText}>{feedback}</Text>
         </View>
       )}
-    </View>
+
+      <View style={styles.buttonArea}>
+        <Button title="Show Source" onPress={showSource} />
+        <Button title={index >= total - 1 ? "Finish Quiz" : "Next Question"} onPress={goNext} />
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  page: {
     flex: 1,
     backgroundColor: "#fff",
-    justifyContent: "center",
+  },
+  container: {
+    flexGrow: 1,
     alignItems: "center",
     padding: 20,
     gap: 20,
