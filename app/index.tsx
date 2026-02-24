@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import React, { useState } from "react";
-import { Alert, Button, StyleSheet, TextInput, View } from "react-native";
+import { Alert, Button, StyleSheet, Text, TextInput, View } from "react-native";
 import { supabase } from "../lib/supabaseClient";
 
 export default function Index() {
@@ -35,7 +35,12 @@ export default function Index() {
 
   return (
     <View style={styles.container}>
+
+      <View style={styles.titleArea}>
+        <Text style={styles.title}>AI-Based Quiz App</Text>
+      </View>
       <View style={styles.inputArea}>
+        
         <TextInput
           style={styles.input}
           placeholder="Username"
@@ -67,14 +72,18 @@ export default function Index() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: "#ffffff",
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
     gap: 20,
   },
+  titleArea: {
+    width: "100%",
+  },
   title: {
     fontSize: 26,
+    color: "#470fed",
     fontWeight: "bold",
     textAlign: "center",
   },

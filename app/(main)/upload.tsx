@@ -151,6 +151,8 @@ export default function Upload() {
         params: {
           subject: data.subject,
           payload: JSON.stringify(data.questions),
+          bucket,
+          paths: JSON.stringify(newPaths), //pass the array of paths to the quiz page so it can request the supporting quotes as needed
         },
       });
     } catch (e: any) {

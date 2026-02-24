@@ -1,25 +1,53 @@
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useMemo, useState } from "react";
-import { Alert, Button, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Button, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { supabase } from "../../lib/supabaseClient";
+
 
 type MCQ = {
+  type: "mcq";
   question: string;
   answers: { A: string; B: string; C: string; D: string };
   correct: "A" | "B" | "C" | "D";
-  supporting_quote?: string;
+  supporting_quote: string;
+};
+//added type ERQ support mixed question types
+type ERQ = {
+  type: "er";
+  question: string;
+  mark_scheme: string;
+  supporting_quote: string;
 };
 
-export default function Quiz() {
-  const { subject, payload } = useLocalSearchParams<{ subject?: string; payload?: string }>();
+type QuizQuestion = MCQ | ERQ;
 
-  const questions = useMemo<MCQ[] | null>(() => {
+export default function Quiz() {
+  //read bucket + paths (needed for grading ER answers)
+  const { subject, payload, bucket, paths } = useLocalSearchParams<{
+    subject?: string;
+    payload?: string;
+    bucket?: string;
+    paths?: string; // JSON string: paths of the uploaded PDFs 
+  }>();
+
+  const questions = useMemo<QuizQuestion[] | null>(() => {
     if (!payload) return null;
     try {
-      return JSON.parse(payload) as MCQ[];
+      return JSON.parse(payload) as QuizQuestion[];
     } catch {
       return null;
     }
   }, [payload]);
+
+  const pdfPaths = useMemo<string[]>(() => {
+    if (!paths) return [];
+    try {
+      const parsed = JSON.parse(paths);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [paths]);
 
   const [index, setIndex] = useState(0);
   const [score, setScore] = useState(0);
@@ -28,9 +56,12 @@ export default function Quiz() {
   const [isLocked, setIsLocked] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
 
+  //added for ER answer state
+  const [erAnswer, setErAnswer] = useState("");
+  const [grading, setGrading] = useState(false);
+
   if (!questions || questions.length === 0) {
     return (
-      //change this page to a scrollview so that all content is visible even on smaller screens
       <ScrollView style={styles.page} contentContainerStyle={styles.container}>
         <View style={styles.titleContainer}>
           <Text style={styles.title}>{subject ?? "Quiz"}</Text>
@@ -59,10 +90,15 @@ export default function Quiz() {
     setIndex((prev) => prev + 1);
     setFeedback(null);
     setIsLocked(false);
+
+    //reset ER state for next question
+    setErAnswer("");
   };
 
-  const handleAnswer = (selected: "A" | "B" | "C" | "D") => {
+  //updated MCQ handler only runs for MCQ type
+  const handleMCQAnswer = (selected: "A" | "B" | "C" | "D") => {
     if (isLocked || isFinished) return;
+    if (q.type !== "mcq") return;
 
     setIsLocked(true);
 
@@ -75,14 +111,73 @@ export default function Quiz() {
     }
   };
 
-  //added this to allow user to view the supporting quote for each question in an alert pulled from the PDF notes
+  //updated, now show source works for both types
   const showSource = () => {
-    const quote = q.supporting_quote?.trim();
+    const quote =
+      q.type === "mcq"
+        ? q.supporting_quote?.trim()
+        : q.supporting_quote?.trim();
+
     if (!quote) {
       Alert.alert("No source available", "This question did not include a supporting quote.");
       return;
     }
     Alert.alert("Source from notes", quote);
+  };
+
+  //submit ER answer and call grade-response edge function
+  const submitExtendedResponse = async () => {
+    if (isLocked || isFinished) return;
+    if (q.type !== "er") return;
+
+    if (!erAnswer.trim()) {
+      Alert.alert("Missing answer", "Please type an answer before submitting.");
+      return;
+    }
+
+    if (!bucket || pdfPaths.length === 0) {
+      Alert.alert(
+        "Missing PDF reference",
+        "Bucket/paths were not provided. Please ensure upload passes bucket and paths to the quiz page."
+      );
+      return;
+    }
+
+    setGrading(true);
+
+    const { data, error } = await supabase.functions.invoke("grade-response", {
+      body: {
+        bucket,
+        paths: pdfPaths,
+        question: q.question,
+        student_answer: erAnswer,
+        mark_scheme: q.mark_scheme,
+      },
+    });
+
+    setGrading(false);
+
+    if (error) {
+      Alert.alert("Grading error", error.message);
+      return;
+    }
+
+    if (!data?.ok) {
+      Alert.alert("Grading failed", data?.error ?? "Unknown error");
+      return;
+    }
+
+    //this lock the question after grading
+    setIsLocked(true);
+
+    if (data.correct) {
+      setScore((prev) => prev + 1);
+      Alert.alert("Correct", `${data.feedback}\n\nSource:\n${data.supporting_quote}`);
+      setFeedback("Correct!");
+    } else {
+      Alert.alert("Incorrect", `${data.feedback}\n\nSource:\n${data.supporting_quote}`);
+      setFeedback("Incorrect!");
+    }
   };
 
   if (isFinished) {
@@ -124,12 +219,36 @@ export default function Quiz() {
         </Text>
       </View>
 
-      <View style={styles.buttonArea}>
-        <Button title={`A) ${q.answers.A}`} onPress={() => handleAnswer("A")} disabled={isLocked} />
-        <Button title={`B) ${q.answers.B}`} onPress={() => handleAnswer("B")} disabled={isLocked} />
-        <Button title={`C) ${q.answers.C}`} onPress={() => handleAnswer("C")} disabled={isLocked} />
-        <Button title={`D) ${q.answers.D}`} onPress={() => handleAnswer("D")} disabled={isLocked} />
-      </View>
+      {/*updated MCQ uer interface only for mcq */}
+      {q.type === "mcq" && (
+        <View style={styles.buttonArea}>
+          <Button title={`A) ${q.answers.A}`} onPress={() => handleMCQAnswer("A")} disabled={isLocked} />
+          <Button title={`B) ${q.answers.B}`} onPress={() => handleMCQAnswer("B")} disabled={isLocked} />
+          <Button title={`C) ${q.answers.C}`} onPress={() => handleMCQAnswer("C")} disabled={isLocked} />
+          <Button title={`D) ${q.answers.D}`} onPress={() => handleMCQAnswer("D")} disabled={isLocked} />
+        </View>
+      )}
+
+      {/*added extended response user interface */}
+      {q.type === "er" && (
+        <View style={styles.erArea}>
+          <TextInput
+            style={styles.textInput}
+            placeholder="Type your answer here..."
+            placeholderTextColor="#808080"
+            value={erAnswer}
+            onChangeText={setErAnswer}
+            editable={!isLocked}
+            multiline
+          />
+
+          {grading && <ActivityIndicator />}
+
+          <View style={styles.buttonArea}>
+            <Button title="Submit Answer" onPress={submitExtendedResponse} disabled={isLocked || grading} />
+          </View>
+        </View>
+      )}
 
       {feedback && (
         <View style={styles.stepContainer}>
@@ -138,7 +257,8 @@ export default function Quiz() {
       )}
 
       <View style={styles.buttonArea}>
-        <Button title="Show Source" onPress={showSource} />
+        {/*added diasabled to the show source button as user could see answer before answering the question */}
+        <Button title="Show Source" onPress={showSource} disabled={!isLocked}/>
         <Button title={index >= total - 1 ? "Finish Quiz" : "Next Question"} onPress={goNext} />
       </View>
     </ScrollView>
@@ -196,5 +316,20 @@ const styles = StyleSheet.create({
   buttonArea: {
     width: "80%",
     gap: 12,
+  },
+  erArea: {
+    width: "100%",
+    alignItems: "center",
+    gap: 12,
+  },
+  textInput: {
+    width: "80%",
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    minHeight: 120,
+    textAlignVertical: "top",
   },
 });
