@@ -3,7 +3,6 @@ import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Button, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { supabase } from "../../lib/supabaseClient";
 
-
 type MCQ = {
   type: "mcq";
   question: string;
@@ -27,7 +26,7 @@ export default function Quiz() {
     subject?: string;
     payload?: string;
     bucket?: string;
-    paths?: string; // JSON string: paths of the uploaded PDFs 
+    paths?: string; // JSON string: paths of the uploaded PDFs
   }>();
 
   const questions = useMemo<QuizQuestion[] | null>(() => {
@@ -60,6 +59,49 @@ export default function Quiz() {
   const [erAnswer, setErAnswer] = useState("");
   const [grading, setGrading] = useState(false);
 
+  //added streak tracking
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [longestStreak, setLongestStreak] = useState(0);
+
+  //addeed save stats helper (high score + longest streak update only if better than last time)
+  const saveUserStats = async (subjectName: string, finalScore: number, finalLongestStreak: number) => {
+    try {
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData.user) return;
+
+      const userId = userData.user.id;
+
+      //read existing row if therre are any
+      const { data: existing, error: readErr } = await supabase
+        .from("user_stats")
+        .select("high_score, longest_streak")
+        .eq("user_id", userId)
+        .eq("subject_name", subjectName)
+        .maybeSingle();
+
+      if (readErr) return;
+
+      const prevHigh = existing?.high_score ?? 0;
+      const prevStreak = existing?.longest_streak ?? 0;
+
+      const newHigh = Math.max(prevHigh, finalScore);
+      const newStreak = Math.max(prevStreak, finalLongestStreak);
+
+      await supabase.from("user_stats").upsert(
+        {
+          user_id: userId,
+          subject_name: subjectName,
+          high_score: newHigh,
+          longest_streak: newStreak,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,subject_name" }
+      );
+    } catch {
+     //ignore errors
+    }
+  };
+
   if (!questions || questions.length === 0) {
     return (
       <ScrollView style={styles.page} contentContainerStyle={styles.container}>
@@ -80,6 +122,9 @@ export default function Quiz() {
     setIsFinished(true);
     setIsLocked(true);
     setFeedback(null);
+
+    //add to save progress when quiz finishes
+    saveUserStats(subject ?? "Unknown", score, longestStreak);
   };
 
   const goNext = () => {
@@ -106,17 +151,24 @@ export default function Quiz() {
     if (correct) {
       setScore((prev) => prev + 1);
       setFeedback("Correct!");
+
+      //update streaks when correct
+      setCurrentStreak((prev) => {
+        const next = prev + 1;
+        setLongestStreak((ls) => Math.max(ls, next));
+        return next;
+      });
     } else {
       setFeedback(`Incorrect! Correct answer: ${q.correct}`);
+
+      //reset streak when incorrect
+      setCurrentStreak(0);
     }
   };
 
   //updated, now show source works for both types
   const showSource = () => {
-    const quote =
-      q.type === "mcq"
-        ? q.supporting_quote?.trim()
-        : q.supporting_quote?.trim();
+    const quote = q.type === "mcq" ? q.supporting_quote?.trim() : q.supporting_quote?.trim();
 
     if (!quote) {
       Alert.alert("No source available", "This question did not include a supporting quote.");
@@ -174,9 +226,19 @@ export default function Quiz() {
       setScore((prev) => prev + 1);
       Alert.alert("Correct", `${data.feedback}\n\nSource:\n${data.supporting_quote}`);
       setFeedback("Correct!");
+
+      //update streaks when correct for  ER
+      setCurrentStreak((prev) => {
+        const next = prev + 1;
+        setLongestStreak((ls) => Math.max(ls, next));
+        return next;
+      });
     } else {
       Alert.alert("Incorrect", `${data.feedback}\n\nSource:\n${data.supporting_quote}`);
       setFeedback("Incorrect!");
+
+      //reset streak when incorrect for ER
+      setCurrentStreak(0);
     }
   };
 
@@ -192,6 +254,9 @@ export default function Quiz() {
           <Text style={styles.finalScore}>
             {score} / {total}
           </Text>
+
+          {/*added to show show streak result for the quiz run */}
+          <Text style={styles.progressText}>Longest streak this quiz: {longestStreak}</Text>
         </View>
 
         <View style={styles.buttonArea}>
@@ -210,6 +275,11 @@ export default function Quiz() {
       <View style={styles.stepContainer}>
         <Text style={styles.progressText}>
           Question {index + 1} of {total} • Score {score}/{total}
+        </Text>
+
+        {/*added to show current streak live */}
+        <Text style={styles.progressText}>
+          Current streak: {currentStreak} • Longest streak: {longestStreak}
         </Text>
       </View>
 
@@ -258,7 +328,7 @@ export default function Quiz() {
 
       <View style={styles.buttonArea}>
         {/*added diasabled to the show source button as user could see answer before answering the question */}
-        <Button title="Show Source" onPress={showSource} disabled={!isLocked}/>
+        <Button title="Show Source" onPress={showSource} disabled={!isLocked} />
         <Button title={index >= total - 1 ? "Finish Quiz" : "Next Question"} onPress={goNext} />
       </View>
     </ScrollView>
@@ -268,7 +338,7 @@ export default function Quiz() {
 const styles = StyleSheet.create({
   page: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: "#ffffff",
   },
   container: {
     flexGrow: 1,
